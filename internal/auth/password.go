@@ -4,7 +4,12 @@ import (
 	"log"
 
 	"github.com/alexedwards/argon2id"
+	"github.com/golang-jwt/jwt/v5"
 )
+
+type ChirpyClaims struct {
+	jwt.RegisteredClaims
+}
 
 func HashPassword(password string) (string, error) {
 	hash, err := argon2id.CreateHash(password, argon2id.DefaultParams)
