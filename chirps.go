@@ -67,7 +67,6 @@ func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	log.Printf("Received the following chirp: %v", req)
 
 	if err != nil {
 		errMessage, _ := json.Marshal(defaultErr)
@@ -137,7 +136,6 @@ func (cfg *apiConfig) getChirp(w http.ResponseWriter, r *http.Request) {
 	c, dbErr := cfg.db.GetChirp(r.Context(), uuid.MustParse(chirpID))
 	if dbErr != nil {
 		w.WriteHeader(404)
-		w.Write([]byte("Something went wrong"))
 		return
 	}
 	responseChirp := Chirp{
@@ -151,4 +149,51 @@ func (cfg *apiConfig) getChirp(w http.ResponseWriter, r *http.Request) {
 	response, _ := json.Marshal(responseChirp)
 
 	w.Write(response)
+}
+
+func (cfg *apiConfig) deleteChirp(w http.ResponseWriter, r *http.Request) {
+	chirpID := r.PathValue("chirpID")
+	if chirpID == "" {
+		w.WriteHeader(404)
+		w.Write([]byte("Chirp ID required"))
+		return
+	}
+	token, tokenErr := auth.GetBearerToken(r.Header)
+	if tokenErr != nil {
+		w.WriteHeader(401)
+		w.Write([]byte("Unathorized"))
+		return
+	}
+
+	uid, authErr := auth.ValidateJWT(token, cfg.tokenSecret)
+	if authErr != nil {
+		w.WriteHeader(401)
+		w.Write([]byte("Unauthorized"))
+		return
+	}
+
+	authorCheck := database.IsChirpAuthorParams{
+		UserID: uid,
+		ID:     uuid.MustParse(chirpID),
+	}
+	authorResult, dbErr := cfg.db.IsChirpAuthor(r.Context(), authorCheck)
+
+	if dbErr != nil {
+		w.WriteHeader(500)
+		return
+	}
+	if !authorResult.IsAuthor {
+		w.WriteHeader(403)
+		return
+	}
+	deleteParams := database.DeleteChirpParams{
+		UserID: uid,
+		ID:     uuid.MustParse(chirpID),
+	}
+	chirpErr := cfg.db.DeleteChirp(r.Context(), deleteParams)
+	if chirpErr != nil {
+		w.WriteHeader(500)
+		return
+	}
+	w.WriteHeader(204)
 }
