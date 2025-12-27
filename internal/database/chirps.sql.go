@@ -45,6 +45,20 @@ func (q *Queries) DeleteAllChirps(ctx context.Context) error {
 	return err
 }
 
+const deleteChirp = `-- name: DeleteChirp :exec
+DELETE FROM chirps WHERE id=$1 AND user_id=$2
+`
+
+type DeleteChirpParams struct {
+	ID     uuid.UUID
+	UserID uuid.UUID
+}
+
+func (q *Queries) DeleteChirp(ctx context.Context, arg DeleteChirpParams) error {
+	_, err := q.db.ExecContext(ctx, deleteChirp, arg.ID, arg.UserID)
+	return err
+}
+
 const getAllChirps = `-- name: GetAllChirps :many
 SELECT id, created_at, updated_at, body, user_id FROM chirps
 `
@@ -92,5 +106,31 @@ func (q *Queries) GetChirp(ctx context.Context, id uuid.UUID) (Chirp, error) {
 		&i.Body,
 		&i.UserID,
 	)
+	return i, err
+}
+
+const isChirpAuthor = `-- name: IsChirpAuthor :one
+SELECT id, CASE
+    WHEN user_id=$1 THEN true
+    ELSE false
+END AS is_author
+FROM chirps
+WHERE id=$2
+`
+
+type IsChirpAuthorParams struct {
+	UserID uuid.UUID
+	ID     uuid.UUID
+}
+
+type IsChirpAuthorRow struct {
+	ID       uuid.UUID
+	IsAuthor bool
+}
+
+func (q *Queries) IsChirpAuthor(ctx context.Context, arg IsChirpAuthorParams) (IsChirpAuthorRow, error) {
+	row := q.db.QueryRowContext(ctx, isChirpAuthor, arg.UserID, arg.ID)
+	var i IsChirpAuthorRow
+	err := row.Scan(&i.ID, &i.IsAuthor)
 	return i, err
 }
