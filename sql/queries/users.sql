@@ -9,3 +9,6 @@ SELECT id, email, created_at, updated_at, hashed_password FROM users where email
 
 -- name: DeleteAllUsers :exec
 TRUNCATE users CASCADE;
+
+-- name: UpdateUserCredentials :one
+UPDATE users SET hashed_password=$1, email=$2, updated_at=now() WHERE id=$3 RETURNING id, updated_at, email;
