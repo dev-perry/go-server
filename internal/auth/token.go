@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -38,7 +40,6 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	})
 
 	if err != nil {
-		log.Fatalf("Error parsing token: %v", err)
 		return uuid.UUID{}, err
 	}
 
@@ -53,19 +54,19 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 
 func GetBearerToken(headers http.Header) (string, error) {
 	authorization := headers.Get("Authorization")
-	if authorization == "" {
-		return "", errors.New("No Authorization Header found")
-	}
-	tokenString, stringErr := strings.CutPrefix(authorization, "Bearer ")
-	if !stringErr {
+	tokenString, prefixFound := strings.CutPrefix(authorization, "Bearer ")
+	if !prefixFound {
 		return "", errors.New("Authorization Header is not in the correct format")
 	}
-
-	log.Println("Token string:", tokenString)
 
 	return tokenString, nil
 }
 
-// func MakeRefreshToken() (string, error) {
+func MakeRefreshToken() (string, error) {
+	key := make([]byte, 32)
+	_, err := rand.Read(key)
+	encoded := hex.EncodeToString(key)
 
-// }
+	return encoded, err
+
+}
