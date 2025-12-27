@@ -61,7 +61,7 @@ func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
 
 	uid, authErr := auth.ValidateJWT(token, cfg.tokenSecret)
 	if authErr != nil {
-		w.WriteHeader(403)
+		w.WriteHeader(401)
 		w.Write([]byte("Unauthorized"))
 		return
 	}

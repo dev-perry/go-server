@@ -2,11 +2,14 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"sync/atomic"
+	"time"
 
+	"github.com/dev-perry/go-server/internal/auth"
 	"github.com/dev-perry/go-server/internal/database"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -20,6 +23,10 @@ type apiConfig struct {
 
 type fail struct {
 	Error string `json:"error"`
+}
+
+type RefreshTokenResponse struct {
+	Token string `json:"token"`
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -39,9 +46,9 @@ func readyHandler(r http.ResponseWriter, _ *http.Request) {
 	r.Write([]byte(message))
 }
 
-func (cfg *apiConfig) metricsHandler(r http.ResponseWriter, _ *http.Request) {
+func (cfg *apiConfig) metricsHandler(w http.ResponseWriter, _ *http.Request) {
 	hits := cfg.fileserverHits.Load()
-	r.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Type", "text/html")
 
 	response := fmt.Sprintf(`
 			<html>
@@ -51,20 +58,69 @@ func (cfg *apiConfig) metricsHandler(r http.ResponseWriter, _ *http.Request) {
   				</body>
 			</html>`,
 		hits)
-	r.Write([]byte(response))
+	w.Write([]byte(response))
 }
 
-func (cfg *apiConfig) reset(res http.ResponseWriter, req *http.Request) {
+func (cfg *apiConfig) reset(w http.ResponseWriter, r *http.Request) {
 	platform := os.Getenv("PLATFORM")
 	if platform != "dev" {
-		res.WriteHeader(403)
+		w.WriteHeader(403)
 		return
 	}
 	cfg.fileserverHits.Swap(0)
-	cfg.db.DeleteAllUsers(req.Context())
-	res.WriteHeader(200)
+	cfg.db.DeleteAllUsers(r.Context())
+	w.WriteHeader(200)
 	message := "OK"
-	res.Write([]byte(message))
+	w.Write([]byte(message))
+}
+
+func (cfg *apiConfig) refreshToken(w http.ResponseWriter, r *http.Request) {
+	bearer, headErr := auth.GetBearerToken(r.Header)
+	if headErr != nil {
+		w.WriteHeader(403)
+		w.Write([]byte("Unathorized"))
+		return
+	}
+
+	uid, refreshErr := cfg.db.GetUserFromRefreshToken(r.Context(), bearer)
+	if refreshErr != nil {
+		w.WriteHeader(401)
+		return
+	}
+	expires, _ := time.ParseDuration("1h")
+	token, tokenErr := auth.MakeJWT(uid, cfg.tokenSecret, expires)
+
+	if tokenErr != nil {
+		w.WriteHeader(500)
+		w.Write([]byte("Something went wrong"))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	response := RefreshTokenResponse{
+		token,
+	}
+
+	resBuff, _ := json.Marshal(response)
+	w.WriteHeader(200)
+	w.Write(resBuff)
+}
+
+func (cfg *apiConfig) revokeToken(w http.ResponseWriter, r *http.Request) {
+	bearer, headErr := auth.GetBearerToken(r.Header)
+	if headErr != nil {
+		w.WriteHeader(403)
+		w.Write([]byte("Unathorized"))
+		return
+	}
+	revokeErr := cfg.db.RevokeRefreshToken(r.Context(), bearer)
+	if revokeErr != nil {
+		w.WriteHeader(500)
+		w.Write([]byte("Something went wrong"))
+		return
+	}
+	w.WriteHeader(204)
+
 }
 
 func main() {
@@ -97,6 +153,8 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", apiCfg.createChirp)
 	mux.HandleFunc("GET /api/chirps", apiCfg.getChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.getChirp)
+	mux.HandleFunc("POST /api/refresh", apiCfg.refreshToken)
+	mux.HandleFunc("POST /api/revoke", apiCfg.revokeToken)
 
 	server.ListenAndServe()
 }

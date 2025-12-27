@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -26,7 +25,8 @@ type User struct {
 
 type AuthSuccessResponse struct {
 	User
-	Token string `json:"token"`
+	Token        string `json:"token"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +38,6 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Something went wrong"))
 		return
 	}
-	log.Printf("Received: %v", user)
 	if user.Email == "" {
 		w.WriteHeader(400)
 		w.Write([]byte("User email is required"))
@@ -81,7 +80,6 @@ func (cfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 	var loginRequest struct {
 		Password string `json:"password"`
 		Email    string `json:"email"`
-		Expires  *int   `json:"expires_in_seconds"`
 	}
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&loginRequest)
@@ -103,30 +101,41 @@ func (cfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if matchPass {
-		var duration time.Duration
+		tokenDur, _ := time.ParseDuration("1h")
+		refDur, _ := time.ParseDuration("1440h")
 
-		if loginRequest.Expires != nil {
-			seconds := fmt.Sprintf("%vs", loginRequest.Expires)
-			s, _ := time.ParseDuration(seconds)
-			duration = s
-		} else {
-			seconds, _ := time.ParseDuration("1h")
-			duration = seconds
-		}
+		duration := tokenDur
 		token, tokenErr := auth.MakeJWT(dbUser.ID, cfg.tokenSecret, duration)
-		if tokenErr != nil {
+		refreshToken, refTokenErr := auth.MakeRefreshToken()
+		if tokenErr != nil || refTokenErr != nil {
 			w.WriteHeader(500)
-			w.Write([]byte("Unable to generate user token"))
+			w.Write([]byte("Unable to generate user tokens"))
 			return
 		}
+
+		refreshParams := database.CreateRefreshTokenParams{
+			Token:     refreshToken,
+			UserID:    dbUser.ID,
+			ExpiresAt: time.Now().Add(refDur),
+		}
+
+		rToken, rTokeErr := cfg.db.CreateRefreshToken(r.Context(), refreshParams)
+
+		if rTokeErr != nil {
+			w.WriteHeader(500)
+			w.Write([]byte("Unable to generate user tokens"))
+			return
+		}
+
 		authResponse := AuthSuccessResponse{
-			User{
+			RefreshToken: rToken.Token,
+			Token:        token,
+			User: User{
 				ID:        dbUser.ID,
 				Email:     dbUser.Email,
 				CreatedAt: dbUser.CreatedAt,
 				UpdatedAt: dbUser.UpdatedAt,
 			},
-			token,
 		}
 
 		response, _ := json.Marshal(authResponse)
