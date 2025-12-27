@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 )
 
-type createUserRequest struct {
+type credsRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
@@ -23,6 +23,12 @@ type User struct {
 	Email     string    `json:"email"`
 }
 
+type UpdatedUserRes struct {
+	ID        uuid.UUID `json:"id"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
+}
+
 type AuthSuccessResponse struct {
 	User
 	Token        string `json:"token"`
@@ -30,7 +36,7 @@ type AuthSuccessResponse struct {
 }
 
 func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
-	user := createUserRequest{}
+	user := credsRequest{}
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&user)
 	if err != nil {
@@ -148,4 +154,55 @@ func (cfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Incorrect email or password"))
 		return
 	}
+}
+
+func (cfg *apiConfig) updateUser(w http.ResponseWriter, r *http.Request) {
+	token, tokenErr := auth.GetBearerToken(r.Header)
+	if tokenErr != nil {
+		w.WriteHeader(401)
+		return
+	}
+	uid, authErr := auth.ValidateJWT(token, cfg.tokenSecret)
+	if authErr != nil {
+		w.WriteHeader(401)
+		w.Write([]byte("Unauthorized"))
+		return
+	}
+	decoder := json.NewDecoder(r.Body)
+	req := credsRequest{}
+	jsonErr := decoder.Decode(&req)
+	if jsonErr != nil {
+		w.WriteHeader(500)
+		log.Printf("Encountered error in JSON decoding: %s", jsonErr)
+		return
+	}
+
+	newPass, hashErr := auth.HashPassword(req.Password)
+	if hashErr != nil {
+		w.WriteHeader(500)
+		log.Printf("Encountered error when creating has for updated password: %s", hashErr)
+		return
+	}
+
+	updateParams := database.UpdateUserCredentialsParams{
+		ID:             uid,
+		Email:          req.Email,
+		HashedPassword: newPass,
+	}
+
+	res, dbErr := cfg.db.UpdateUserCredentials(r.Context(), updateParams)
+	if dbErr != nil {
+		w.WriteHeader(500)
+		log.Printf("Encountered error when updating user record: %s", dbErr)
+		return
+	}
+	response := UpdatedUserRes{
+		ID:        res.ID,
+		UpdatedAt: res.UpdatedAt,
+		Email:     res.Email,
+	}
+	json, _ := json.Marshal(response)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	w.Write(json)
 }
