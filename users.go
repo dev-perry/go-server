@@ -17,10 +17,11 @@ type credsRequest struct {
 }
 
 type User struct {
-	ID        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
+	ID          uuid.UUID `json:"id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Email       string    `json:"email"`
+	IsChirpyRed bool      `json:"is_chirpy_red"`
 }
 
 type UpdatedUserRes struct {
@@ -137,10 +138,11 @@ func (cfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 			RefreshToken: rToken.Token,
 			Token:        token,
 			User: User{
-				ID:        dbUser.ID,
-				Email:     dbUser.Email,
-				CreatedAt: dbUser.CreatedAt,
-				UpdatedAt: dbUser.UpdatedAt,
+				ID:          dbUser.ID,
+				Email:       dbUser.Email,
+				CreatedAt:   dbUser.CreatedAt,
+				UpdatedAt:   dbUser.UpdatedAt,
+				IsChirpyRed: dbUser.IsChirpyRed.Bool,
 			},
 		}
 

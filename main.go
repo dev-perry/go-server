@@ -11,6 +11,7 @@ import (
 
 	"github.com/dev-perry/go-server/internal/auth"
 	"github.com/dev-perry/go-server/internal/database"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
@@ -19,6 +20,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
 	tokenSecret    string
+	polkaKey       string
 }
 
 type fail struct {
@@ -27,6 +29,13 @@ type fail struct {
 
 type RefreshTokenResponse struct {
 	Token string `json:"token"`
+}
+
+type polkaRequest struct {
+	Event string `json:"event"`
+	Data  struct {
+		UserId uuid.UUID `json:"user_id"`
+	} `json:"data"`
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -123,10 +132,41 @@ func (cfg *apiConfig) revokeToken(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func (cfg *apiConfig) polkaHandler(w http.ResponseWriter, r *http.Request) {
+	apiKey, keyErr := auth.GetAPIKey(r.Header)
+	if keyErr != nil || apiKey != cfg.polkaKey {
+		w.WriteHeader(401)
+		return
+	}
+	polka := polkaRequest{}
+	decoder := json.NewDecoder(r.Body)
+	if jsonErr := decoder.Decode(&polka); jsonErr != nil {
+		w.WriteHeader(500)
+		return
+	}
+
+	event := polka.Event
+	userId := polka.Data.UserId
+
+	if event == "user.upgraded" {
+		upgradeErr := cfg.db.UpgradeUser(r.Context(), userId)
+
+		if upgradeErr != nil {
+			w.WriteHeader(404)
+			return
+		}
+		w.WriteHeader(204)
+		return
+	}
+	w.WriteHeader(204)
+}
+
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
 	tokenSecret := os.Getenv("TOKEN_SECRET")
+	polkaKey := os.Getenv("POLKA_KEY")
+
 	db, _ := sql.Open("postgres", dbURL)
 	dbQueries := database.New(db)
 
@@ -134,6 +174,7 @@ func main() {
 		fileserverHits: atomic.Int32{},
 		db:             dbQueries,
 		tokenSecret:    tokenSecret,
+		polkaKey:       polkaKey,
 	}
 
 	mux := http.NewServeMux()
@@ -157,6 +198,7 @@ func main() {
 	mux.HandleFunc("POST /api/refresh", apiCfg.refreshToken)
 	mux.HandleFunc("POST /api/revoke", apiCfg.revokeToken)
 	mux.HandleFunc("PUT /api/users", apiCfg.updateUser)
+	mux.HandleFunc("POST /api/polka/webhooks", apiCfg.polkaHandler)
 
 	server.ListenAndServe()
 }
