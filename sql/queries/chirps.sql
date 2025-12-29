@@ -10,6 +10,9 @@ SELECT * FROM chirps WHERE id = $1;
 -- name: GetAllChirps :many
 SELECT * FROM chirps;
 
+-- name: GetAllChirpsByAuthor :many
+SELECT * FROM chirps WHERE user_id=$1;
+
 -- name: DeleteAllChirps :exec
 TRUNCATE chirps;
 
